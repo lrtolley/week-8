@@ -4,31 +4,18 @@ import numpy as np
 
 class MarkovText:
     def __init__(self, corpus):
-        """
-        corpus may be:
-         - a str (will be split on whitespace)
-         - bytes (decoded then split)
-         - an iterable of tokens (list, tuple, numpy array, generator)
-         - a list with a single string element (interpreted as a single-string corpus and split)
-        """
-        # string
         if isinstance(corpus, str):
             self.tokens = corpus.split()
-        # bytes
         elif isinstance(corpus, bytes):
             self.tokens = corpus.decode().split()
         else:
-            # attempt to materialize the iterable
             try:
                 seq = list(corpus)
             except TypeError:
                 raise TypeError("corpus must be a string, bytes, or an iterable of tokens")
-
-            # special-case: a list/iterable with exactly one string that looks like a sentence
             if len(seq) == 1 and isinstance(seq[0], str) and any(ch.isspace() for ch in seq[0]):
                 self.tokens = seq[0].split()
             else:
-                # otherwise treat elements as tokens (decode bytes elements if present)
                 processed = []
                 for item in seq:
                     if isinstance(item, bytes):
@@ -48,11 +35,15 @@ class MarkovText:
         self.term_dict = dict(td)
         return self.term_dict
 
+    def _random_state_with_followers(self):
+        # return a random key that has at least one follower; fallback to any token if none
+        keys_with_followers = [k for k, v in self.term_dict.items() if v]
+        return random.choice(keys_with_followers) if keys_with_followers else random.choice(self.tokens)
+
     def generate(self, term_count=20, seed_term=None):
         if self.term_dict is None:
             self.get_term_dict()
 
-        # exact error message expected by autograder
         try:
             term_count = int(term_count)
         except (TypeError, ValueError):
@@ -60,12 +51,17 @@ class MarkovText:
         if term_count <= 0:
             return []
 
+        # Validate seed against observed Markov states (term_dict keys)
         if seed_term is None:
-            current = random.choice(self.tokens)
+            current = self._random_state_with_followers()
         else:
-            if seed_term not in self.tokens:
+            if seed_term not in self.term_dict:
                 raise ValueError("seed_term not found in corpus")
-            current = seed_term
+            # If the seed exists but has no followers, start from a state that does
+            if not self.term_dict[seed_term]:
+                current = self._random_state_with_followers()
+            else:
+                current = seed_term
 
         output = [current]
         while len(output) < term_count:
@@ -73,7 +69,9 @@ class MarkovText:
             if followers:
                 next_token = np.random.choice(followers)
             else:
-                next_token = random.choice(self.tokens)
+                # pick a random state that has followers (keeps transitions valid)
+                current = self._random_state_with_followers()
+                next_token = np.random.choice(self.term_dict[current])
             output.append(next_token)
             current = next_token
 
