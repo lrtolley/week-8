@@ -1,60 +1,59 @@
-from collections import defaultdict
 import random
+from collections import defaultdict
+import numpy as np
 
-
-class MarkovText(object):
-
+class MarkovText:
     def __init__(self, corpus):
-        self.corpus = corpus
-        self.term_dict = None  # you'll need to build this
+        """
+        corpus: iterable of tokens (list of strings) or a single string which will be split on whitespace.
+        """
+        if isinstance(corpus, str):
+            self.tokens = corpus.split()
+        else:
+            self.tokens = list(corpus)
+        self.term_dict = None
 
     def get_term_dict(self):
-
-        # build a dict mapping each token to a list of followers (duplicates preserved)
-        tokens = self.corpus.split() if self.corpus is not None else []
-        d = defaultdict(list)
-
-        # populate followers
-        for i in range(len(tokens) - 1):
-            d[tokens[i]].append(tokens[i + 1])
-
-        # ensure last token exists with empty follower list (if any tokens)
-        if tokens:
-            d[tokens[-1]]  # access to create key with empty list if needed
-
-        # convert to regular dict, store and return
-        self.term_dict = {k: list(v) for k, v in d.items()}
+        """
+        Build and return a dict where each key is a token and the value is a list
+        of tokens that follow that key in the corpus. Duplicates are kept so next-token
+        sampling reflects observed frequencies.
+        """
+        td = defaultdict(list)
+        for a, b in zip(self.tokens, self.tokens[1:]):
+            td[a].append(b)
+        # ensure every token appears as a key (even if it has no followers)
+        for t in self.tokens:
+            td.setdefault(t, [])
+        self.term_dict = dict(td)
         return self.term_dict
 
-
-    def generate(self, seed_term=None, term_count=15):
-
-        # ensure term_dict exists
+    def generate(self, term_count=20, seed_term=None):
+        """
+        Generate up to term_count tokens using the 1-word Markov property.
+        If seed_term is provided but not found in the corpus, raise ValueError.
+        If a current token has no followers, generation stops early and the current sequence is returned.
+        """
         if self.term_dict is None:
             self.get_term_dict()
 
         if term_count <= 0:
-            return ""
+            return []
 
-        if not self.term_dict:
-            raise ValueError("Corpus contains no terms to generate from.")
-
-        # choose starting term
         if seed_term is None:
-            current = random.choice(list(self.term_dict.keys()))
+            current = random.choice(self.tokens)
         else:
             if seed_term not in self.term_dict:
-                raise ValueError("seed_term not in term dictionary")
+                raise ValueError("seed_term not found in corpus")
             current = seed_term
 
         output = [current]
-
-        # generate up to term_count tokens
-        while len(output) < term_count:
+        for _ in range(term_count - 1):
             followers = self.term_dict.get(current, [])
             if not followers:
                 break
-            current = random.choice(followers)
-            output.append(current)
+            next_token = np.random.choice(followers)
+            output.append(next_token)
+            current = next_token
 
-        return " ".join(output)
+        return output
