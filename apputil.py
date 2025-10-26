@@ -1,15 +1,14 @@
 import random
 from collections import defaultdict
-import numpy as np
 
 class MarkovText:
     def __init__(self, corpus):
         """
-        Accept corpus that the autograder commonly provides:
-        - a str -> split on whitespace
+        Robust corpus handling:
+        - str -> split on whitespace
         - bytes -> decode then split
-        - an iterable of tokens (list, tuple, np.array, generator)
-        - a single-element list/tuple whose sole element is a str -> split that inner string
+        - iterable of tokens -> use items as tokens
+        - single-element iterable whose element is a str -> split that inner string
         This initializer never calls .split on a list object itself.
         """
         if isinstance(corpus, str):
@@ -61,12 +60,17 @@ class MarkovText:
         return self.term_dict
 
     def _normalize_term_count(self, term_count):
-        if isinstance(term_count, (int, np.integer)) and not isinstance(term_count, bool):
+        # Must raise exact TypeError text when not convertible
+        if isinstance(term_count, bool):
+            raise TypeError("term_count must be an integer or convertible to int")
+        if isinstance(term_count, int):
             return int(term_count)
+        # try direct conversion (handles strings like "10" and numeric types)
         try:
             return int(term_count)
         except Exception:
             pass
+        # if it's a single-element iterable (e.g., [10], (10,), array-like), try extracting the single element
         try:
             seq = list(term_count)
         except Exception:
@@ -97,6 +101,7 @@ class MarkovText:
         if term_count <= 0:
             return []
 
+        # seed must be a seen state (key in term_dict)
         if seed_term is None:
             current = self._random_state_with_followers()
             if current is None:
@@ -115,12 +120,12 @@ class MarkovText:
         while len(output) < term_count:
             followers = self.term_dict.get(current, [])
             if followers:
-                nxt = np.random.choice(followers)
+                nxt = random.choice(followers)
             else:
                 current = self._random_state_with_followers()
                 followers = self.term_dict.get(current, [])
                 if followers:
-                    nxt = np.random.choice(followers)
+                    nxt = random.choice(followers)
                 else:
                     nxt = random.choice(self.tokens) if self.tokens else None
             if nxt is None:
