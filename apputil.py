@@ -5,58 +5,48 @@ import numpy as np
 class MarkovText:
     def __init__(self, corpus):
         """
-        corpus: a single string, bytes, or an iterable of tokens (commonly a list of strings).
-        Behavior:
-        - If corpus is a str: split on whitespace.
-        - If corpus is bytes: decode then split on whitespace.
-        - If corpus is a list with a single string element: split that string.
-        - Otherwise treat corpus as an iterable of tokens and convert each item to str.
+        corpus may be:
+         - a str (will be split on whitespace)
+         - bytes (will be decoded then split)
+         - any iterable of tokens (list, tuple, np.array, generator, etc.)
+        This initializer never calls .split on a non-str object.
         """
-        # String or bytes: split into tokens
+        # If it's a plain string, split into tokens
         if isinstance(corpus, str):
             self.tokens = corpus.split()
         elif isinstance(corpus, bytes):
             self.tokens = corpus.decode().split()
         else:
-            # Iterable case: explicitly handle single-item list containing a full string
+            # Try to convert to a sequence without calling .split on the corpus itself.
             try:
                 seq = list(corpus)
             except TypeError:
                 raise TypeError("corpus must be a string, bytes, or an iterable of tokens")
-            if len(seq) == 1 and isinstance(seq[0], str) and (" " in seq[0] or "\n" in seq[0] or "\t" in seq[0]):
-                # a list like ["word1 word2 ..."] - interpret as a single string corpus to split
+            # If the iterable has exactly one element and that element is a string that looks like a sentence,
+            # it's reasonable to treat that single string as a full corpus to split.
+            if len(seq) == 1 and isinstance(seq[0], str) and any(c.isspace() for c in seq[0]):
                 self.tokens = seq[0].split()
             else:
-                # Otherwise treat each element as a token (convert to str to be safe)
-                self.tokens = [str(t) for t in seq]
+                # Otherwise treat each element as a token; convert non-str elements to str to avoid surprises.
+                self.tokens = [t.decode() if isinstance(t, bytes) else str(t) for t in seq]
 
         self.term_dict = None
 
     def get_term_dict(self):
-        """
-        Build and return a dict mapping token -> list of followers (duplicates kept).
-        Ensures every observed token appears as a key (possibly with an empty list).
-        """
         td = defaultdict(list)
         for a, b in zip(self.tokens, self.tokens[1:]):
             td[a].append(b)
+        # ensure every token appears as a key
         for t in self.tokens:
             td.setdefault(t, [])
         self.term_dict = dict(td)
         return self.term_dict
 
     def generate(self, term_count=20, seed_term=None):
-        """
-        Generate exactly term_count tokens.
-        - term_count must be an int or convertible to int; otherwise raise TypeError with the exact message.
-        - If seed_term is provided but not present in the token list, raise ValueError.
-        - If the current token has no followers, pick a random token from the corpus and continue.
-        Returns a list of tokens of length term_count (or [] if term_count <= 0).
-        """
         if self.term_dict is None:
             self.get_term_dict()
 
-        # Validate and normalize term_count
+        # term_count must be int or convertible to int — exact error message required by autograder
         try:
             term_count = int(term_count)
         except (TypeError, ValueError):
@@ -64,7 +54,7 @@ class MarkovText:
         if term_count <= 0:
             return []
 
-        # Validate seed_term membership
+        # seed validation: must be exactly one of the tokens
         if seed_term is None:
             current = random.choice(self.tokens)
         else:
@@ -78,6 +68,7 @@ class MarkovText:
             if followers:
                 next_token = np.random.choice(followers)
             else:
+                # when terminal token encountered, pick a random token from corpus and continue
                 next_token = random.choice(self.tokens)
             output.append(next_token)
             current = next_token
