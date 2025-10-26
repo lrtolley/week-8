@@ -4,17 +4,57 @@ import numpy as np
 
 class MarkovText:
     def __init__(self, corpus):
+        """
+        Accepts:
+         - str -> split on whitespace
+         - bytes -> decode then split
+         - iterable of tokens (list, tuple, np.array, generator)
+         - an iterable with a single element which itself may be:
+            * a str -> split that string
+            * an iterable of tokens (list/tuple/np.array) -> treat that inner iterable as tokens
+        Never calls .split on a list object.
+        """
+        # direct string/bytes
         if isinstance(corpus, str):
             self.tokens = corpus.split()
         elif isinstance(corpus, bytes):
             self.tokens = corpus.decode().split()
         else:
+            # materialize outer iterable
             try:
                 seq = list(corpus)
             except TypeError:
                 raise TypeError("corpus must be a string, bytes, or an iterable of tokens")
-            if len(seq) == 1 and isinstance(seq[0], str) and any(ch.isspace() for ch in seq[0]):
-                self.tokens = seq[0].split()
+
+            # if outer iterable is empty
+            if len(seq) == 0:
+                self.tokens = []
+            # single-element outer iterable
+            elif len(seq) == 1:
+                inner = seq[0]
+                # single string inside: split it
+                if isinstance(inner, str):
+                    self.tokens = inner.split()
+                # single bytes inside: decode then split
+                elif isinstance(inner, bytes):
+                    self.tokens = inner.decode().split()
+                # single iterable inside (list/tuple/np.ndarray/generator) -> use its items as tokens
+                else:
+                    try:
+                        inner_seq = list(inner)
+                    except TypeError:
+                        # not iterable, coerce to str token
+                        self.tokens = [str(inner)]
+                    else:
+                        # convert bytes elements and non-str elements safely
+                        processed = []
+                        for item in inner_seq:
+                            if isinstance(item, bytes):
+                                processed.append(item.decode())
+                            else:
+                                processed.append(str(item))
+                        self.tokens = processed
+            # multi-element outer iterable: treat each element as a token
             else:
                 processed = []
                 for item in seq:
@@ -35,31 +75,55 @@ class MarkovText:
         self.term_dict = dict(td)
         return self.term_dict
 
+    def _normalize_term_count(self, term_count):
+        # Allow int-like, numpy scalars, or single-element iterables like [10] or np.array([10])
+        if isinstance(term_count, (int, np.integer)):
+            return int(term_count)
+        # If it's a one-element iterable, extract that element
+        try:
+            seq = list(term_count)
+        except TypeError:
+            # not iterable and not int-like -> try converting directly
+            try:
+                return int(term_count)
+            except Exception:
+                raise TypeError("term_count must be an integer or convertible to int")
+        else:
+            if len(seq) == 1:
+                try:
+                    return int(seq[0])
+                except Exception:
+                    raise TypeError("term_count must be an integer or convertible to int")
+            # otherwise not convertible
+            raise TypeError("term_count must be an integer or convertible to int")
+
     def _random_state_with_followers(self):
-        # return a random key that has at least one follower; fallback to any token if none
+        if self.term_dict is None:
+            self.get_term_dict()
         keys_with_followers = [k for k, v in self.term_dict.items() if v]
-        return random.choice(keys_with_followers) if keys_with_followers else random.choice(self.tokens)
+        return random.choice(keys_with_followers) if keys_with_followers else random.choice(self.tokens) if self.tokens else None
 
     def generate(self, term_count=20, seed_term=None):
         if self.term_dict is None:
             self.get_term_dict()
 
-        try:
-            term_count = int(term_count)
-        except (TypeError, ValueError):
-            raise TypeError("term_count must be an integer or convertible to int")
+        term_count = self._normalize_term_count(term_count)
         if term_count <= 0:
             return []
 
-        # Validate seed against observed Markov states (term_dict keys)
+        # seed must be an observed state (a key in term_dict)
         if seed_term is None:
             current = self._random_state_with_followers()
+            if current is None:
+                return []
         else:
             if seed_term not in self.term_dict:
                 raise ValueError("seed_term not found in corpus")
-            # If the seed exists but has no followers, start from a state that does
+            # if seed has no followers, restart from a random state that does
             if not self.term_dict[seed_term]:
                 current = self._random_state_with_followers()
+                if current is None:
+                    return []
             else:
                 current = seed_term
 
@@ -69,9 +133,16 @@ class MarkovText:
             if followers:
                 next_token = np.random.choice(followers)
             else:
-                # pick a random state that has followers (keeps transitions valid)
+                # jump to a random valid state (with followers) and take one of its followers
                 current = self._random_state_with_followers()
-                next_token = np.random.choice(self.term_dict[current])
+                followers = self.term_dict.get(current, [])
+                if not followers:
+                    # no followers anywhere, fallback to random token
+                    next_token = random.choice(self.tokens) if self.tokens else None
+                else:
+                    next_token = np.random.choice(followers)
+            if next_token is None:
+                break
             output.append(next_token)
             current = next_token
 
