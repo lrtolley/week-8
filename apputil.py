@@ -5,23 +5,37 @@ import numpy as np
 class MarkovText:
     def __init__(self, corpus):
         """
-        corpus: either a single string or an iterable of tokens.
+        corpus: a single string, bytes, or an iterable of tokens (commonly a list of strings).
+        Behavior:
+        - If corpus is a str: split on whitespace.
+        - If corpus is bytes: decode then split on whitespace.
+        - If corpus is a list with a single string element: split that string.
+        - Otherwise treat corpus as an iterable of tokens and convert each item to str.
         """
-        # Accept either a single string or any iterable of tokens
+        # String or bytes: split into tokens
         if isinstance(corpus, str):
             self.tokens = corpus.split()
+        elif isinstance(corpus, bytes):
+            self.tokens = corpus.decode().split()
         else:
-            # Defensive: if corpus is bytes, decode first; otherwise convert iterable to list
-            if isinstance(corpus, bytes):
-                self.tokens = corpus.decode().split()
+            # Iterable case: explicitly handle single-item list containing a full string
+            try:
+                seq = list(corpus)
+            except TypeError:
+                raise TypeError("corpus must be a string, bytes, or an iterable of tokens")
+            if len(seq) == 1 and isinstance(seq[0], str) and (" " in seq[0] or "\n" in seq[0] or "\t" in seq[0]):
+                # a list like ["word1 word2 ..."] - interpret as a single string corpus to split
+                self.tokens = seq[0].split()
             else:
-                self.tokens = list(corpus)
+                # Otherwise treat each element as a token (convert to str to be safe)
+                self.tokens = [str(t) for t in seq]
+
         self.term_dict = None
 
     def get_term_dict(self):
         """
-        Build a dict where each token maps to a list of following tokens.
-        Duplicates are kept so sampling reflects observed frequencies.
+        Build and return a dict mapping token -> list of followers (duplicates kept).
+        Ensures every observed token appears as a key (possibly with an empty list).
         """
         td = defaultdict(list)
         for a, b in zip(self.tokens, self.tokens[1:]):
@@ -34,9 +48,10 @@ class MarkovText:
     def generate(self, term_count=20, seed_term=None):
         """
         Generate exactly term_count tokens.
-        term_count is validated and converted to int if possible.
-        seed_term must be an element of the token list or None.
-        If the current token has no followers, a random token from the corpus is chosen.
+        - term_count must be an int or convertible to int; otherwise raise TypeError with the exact message.
+        - If seed_term is provided but not present in the token list, raise ValueError.
+        - If the current token has no followers, pick a random token from the corpus and continue.
+        Returns a list of tokens of length term_count (or [] if term_count <= 0).
         """
         if self.term_dict is None:
             self.get_term_dict()
@@ -44,16 +59,15 @@ class MarkovText:
         # Validate and normalize term_count
         try:
             term_count = int(term_count)
-        except Exception:
+        except (TypeError, ValueError):
             raise TypeError("term_count must be an integer or convertible to int")
         if term_count <= 0:
             return []
 
-        # Validate seed_term
+        # Validate seed_term membership
         if seed_term is None:
             current = random.choice(self.tokens)
         else:
-            # Accept seed_term as any hashable token; membership tested against tokens list
             if seed_term not in self.tokens:
                 raise ValueError("seed_term not found in corpus")
             current = seed_term
